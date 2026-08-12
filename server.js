@@ -24,13 +24,13 @@ const ENABLE_THINKING_MODE = process.env.ENABLE_THINKING_MODE === 'true' || true
 // 🎯 MODEL MAPPING — verified against build.nvidia.com/models (July 2025)
 const MODEL_MAPPING = {
   // --- DeepSeek (confirmed live on NIM) ---
-  'deepseek-v4-pro':   'deepseek-ai/deepseek-v4-pro',    // 1M ctx, flagship MoE
-  'deepseek-v4-flash': 'deepseek-ai/deepseek-v4-flash',  // 1M ctx, fast 284B MoE
+  'deepseek-v4-pro':   'deepseek-ai/deepseek-v4-pro',
+  'deepseek-v4-flash': 'deepseek-ai/deepseek-v4-flash',
   'gpt-4':             'deepseek-ai/deepseek-v4-pro',
   'gpt-4o':            'deepseek-ai/deepseek-v4-flash',
 
   // --- NVIDIA Nemotron ---
-  'gpt-3.5-turbo':  'nvidia/nemotron-3-ultra-550b-a55b',  // New! 550B hybrid MoE, 1M ctx
+  'gpt-3.5-turbo':  'nvidia/nemotron-3-ultra-550b-a55b',
   'gpt-4o-mini':    'nvidia/nemotron-3-super-120b-a12b',
 
   // --- Qwen ---
@@ -42,16 +42,16 @@ const MODEL_MAPPING = {
   'gemini-pro':      'mistralai/mistral-medium-3.5-128b',
 
   // --- GLM (Z.ai, free endpoint) ---
-  'glm-pro':    'z-ai/glm-5.2',   // New! Flagship agentic LLM, replaces 5.1 & 4.7
+  'glm-pro':    'z-ai/glm-5.2',
 
   // --- MiniMax (free endpoint) ---
-  'minimax':    'minimaxai/minimax-m3',   // New! Replaces m2.7, multimodal MoE
+  'minimax':    'minimaxai/minimax-m3',
 
   // --- Kimi (Moonshot AI) ---
-  'kimi':       'moonshotai/kimi-k2.6',  // New! 1T MoE, long-horizon, tool use
+  'kimi':       'moonshotai/kimi-k2.6',
 
   // --- Step (StepFun AI, free endpoint) ---
-  'step-flash': 'stepfun-ai/step-3.7-flash',  // New! Sparse MoE, fast reasoning
+  'step-flash': 'stepfun-ai/step-3.7-flash',
 
   // --- Google ---
   'gemma':      'google/gemma-4-31b-it',
@@ -61,7 +61,7 @@ const MODEL_MAPPING = {
   'claude-3-sonnet': 'openai/gpt-oss-20b',
 };
 
-// 🔄 FALLBACK CHAIN - When primary model hits 429, try these in order
+// 🔄 FALLBACK CHAIN
 const FALLBACK_CHAIN = [
   'deepseek-ai/deepseek-v4-flash',
   'mistralai/mistral-medium-3.5-128b',
@@ -70,14 +70,6 @@ const FALLBACK_CHAIN = [
   'minimaxai/minimax-m3',
   'stepfun-ai/step-3.7-flash',
 ];
-
-// 🛡️ ROLEPLAY GUARD - Injected into every request to prevent the model from speaking as the user
-const RP_GUARD_INSTRUCTION = `You are ONLY the character described in the system prompt or conversation. Follow these rules strictly:
-- You ONLY speak, act, and think as the character. You do NEVER write or generate any dialogue, actions, or thoughts for the user or any other character that the user is playing.
-- Do NOT use labels like "User:", "Human:", "You:" or any prefix to simulate the user's side of the conversation.
-- Do NOT continue the conversation by inventing what the user says or does next.
-- Stop your response immediately after your character's turn ends.
-- If you feel the scene needs a reaction from the user, end your response and wait.`;
 
 // 🛡️ ROLEPLAY GUARD - Strips any text where the model broke character and started writing as the user
 function stripUserBreakout(text) {
@@ -275,16 +267,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       }
     }
     
-    // 🛡️ ROLEPLAY GUARD - Inject character-only instruction
-    const systemIndex = messages.findIndex(m => m.role === 'system');
-    if (systemIndex !== -1) {
-      messages[systemIndex] = {
-        ...messages[systemIndex],
-        content: messages[systemIndex].content + '\n\n' + RP_GUARD_INSTRUCTION
-      };
-    } else {
-      messages.unshift({ role: 'system', content: RP_GUARD_INSTRUCTION });
-    }
+    // Roleplay Guard completely removed
 
     const nimRequest = {
       model: nimModel,
@@ -295,23 +278,22 @@ app.post('/v1/chat/completions', async (req, res) => {
     };
 
     if (ENABLE_THINKING_MODE && THINKING_MODELS.includes(nimModel)) {
-  if (nimModel.includes('deepseek')) {
-    nimRequest.extra_body = { thinking: true };
-  } else if (nimModel.includes('nemotron')) {
-    if (nimRequest.messages[0]?.role !== 'system') {
-      nimRequest.messages.unshift({
-        role: 'system',
-        content: 'detailed thinking on'
-      });
-    }
-  } else if (nimModel.includes('glm-5.2') || nimModel.includes('z-ai/glm')) {
-    // Force thinking for GLM-5.2
-    nimRequest.chat_template_kwargs = {
-      enable_thinking: true
-    };
-    // Also try the reasoning effort parameter
-    nimRequest.reasoning_effort = "high";
-  }
+      if (nimModel.includes('deepseek')) {
+        nimRequest.extra_body = { thinking: true };
+      } else if (nimModel.includes('nemotron')) {
+        if (nimRequest.messages[0]?.role !== 'system') {
+          nimRequest.messages.unshift({
+            role: 'system',
+            content: 'detailed thinking on'
+          });
+        }
+      } else if (nimModel.includes('glm-5.2') || nimModel.includes('z-ai/glm')) {
+        // Force thinking for GLM-5.2
+        nimRequest.chat_template_kwargs = {
+          enable_thinking: true
+        };
+        nimRequest.reasoning_effort = "high";
+      }
     }
     
     // 🔄 Use fallback-aware request helper
