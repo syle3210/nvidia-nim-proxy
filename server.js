@@ -295,16 +295,23 @@ app.post('/v1/chat/completions', async (req, res) => {
     };
 
     if (ENABLE_THINKING_MODE && THINKING_MODELS.includes(nimModel)) {
-      if (nimModel.includes('deepseek')) {
-        nimRequest.extra_body = { thinking: true };
-      } else if (nimModel.includes('nemotron')) {
-        if (nimRequest.messages[0]?.role !== 'system') {
-          nimRequest.messages.unshift({
-            role: 'system',
-            content: 'detailed thinking on'
-          });
-        }
-      }
+  if (nimModel.includes('deepseek')) {
+    nimRequest.extra_body = { thinking: true };
+  } else if (nimModel.includes('nemotron')) {
+    if (nimRequest.messages[0]?.role !== 'system') {
+      nimRequest.messages.unshift({
+        role: 'system',
+        content: 'detailed thinking on'
+      });
+    }
+  } else if (nimModel.includes('glm-5.2') || nimModel.includes('z-ai/glm')) {
+    // Force thinking for GLM-5.2
+    nimRequest.chat_template_kwargs = {
+      enable_thinking: true
+    };
+    // Also try the reasoning effort parameter
+    nimRequest.reasoning_effort = "high";
+  }
     }
     
     // 🔄 Use fallback-aware request helper
