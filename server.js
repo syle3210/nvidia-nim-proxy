@@ -47,7 +47,7 @@ app.post('/v1/chat/completions', async (req, res) => {
 
     // DeepSeek V4
     if (modelName.includes('deepseek')) {
-      body.reasoning_effort = 'max';
+      body.reasoning_effort = 'medium';
       // Some DeepSeek versions also respond to this
       body.chat_template_kwargs = {
         enable_thinking: true
