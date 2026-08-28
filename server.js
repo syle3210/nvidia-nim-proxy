@@ -25,19 +25,25 @@ app.post('/v1/chat/completions', async (req, res) => {
   }
 
   try {
-    // Start with the exact body Janitor sent
     const body = { ...req.body };
 
-    // Only remove fields that can cause problems (same as Python)
+    // Only remove fields that can cause problems
     delete body.extra_body;
     delete body.logit_bias;
 
-    // Optional: force thinking only for Gemma and MiniMax (same as your Python)
     const modelName = (body.model || '').toLowerCase();
+
+    // Gemma & MiniMax
     if (modelName.includes('gemma') || modelName.includes('minimax')) {
       body.chat_template_kwargs = {
         enable_thinking: true
       };
+    }
+
+    // Kimi K3 — uses reasoning_effort instead
+    if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
+      // "high" is a good balance. Change to "max" if you want maximum reasoning
+      body.reasoning_effort = 'high';
     }
 
     const isStreaming = body.stream === true;
