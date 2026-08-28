@@ -40,11 +40,6 @@ app.post('/v1/chat/completions', async (req, res) => {
       };
     }
 
-    // Kimi K3
-    if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
-      body.reasoning_effort = 'high';
-    }
-
     // DeepSeek V4
     if (modelName.includes('deepseek')) {
       body.reasoning_effort = 'low';
