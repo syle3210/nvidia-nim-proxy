@@ -50,7 +50,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       body.reasoning_effort = 'medium';
       // Some DeepSeek versions also respond to this
       body.chat_template_kwargs = {
-        enable_thinking: true
+        enable_thinking: false
       };
     }
 
