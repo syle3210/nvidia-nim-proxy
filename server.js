@@ -27,7 +27,7 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const body = { ...req.body };
 
-    // Only remove fields that can cause problems
+    // Clean problematic fields
     delete body.extra_body;
     delete body.logit_bias;
 
@@ -40,10 +40,18 @@ app.post('/v1/chat/completions', async (req, res) => {
       };
     }
 
-    // Kimi K3 — uses reasoning_effort instead
+    // Kimi K3
     if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
-      // "high" is a good balance. Change to "max" if you want maximum reasoning
       body.reasoning_effort = 'high';
+    }
+
+    // DeepSeek V4
+    if (modelName.includes('deepseek')) {
+      body.reasoning_effort = 'high';
+      // Some DeepSeek versions also respond to this
+      body.chat_template_kwargs = {
+        enable_thinking: true
+      };
     }
 
     const isStreaming = body.stream === true;
