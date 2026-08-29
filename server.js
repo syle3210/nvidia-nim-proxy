@@ -27,7 +27,7 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const body = { ...req.body };
 
-    // Clean problematic fields
+    // Clean fields that often cause problems
     delete body.extra_body;
     delete body.logit_bias;
     delete body.presence_penalty;
@@ -37,21 +37,22 @@ app.post('/v1/chat/completions', async (req, res) => {
 
     const modelName = (body.model || '').toLowerCase();
 
+    // Gemma & MiniMax
     if (modelName.includes('gemma') || modelName.includes('minimax')) {
       body.chat_template_kwargs = { enable_thinking: true };
     }
 
+    // Kimi K3
     if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
       body.reasoning_effort = 'high';
     }
 
+    // DeepSeek
     if (modelName.includes('deepseek')) {
       body.reasoning_effort = 'high';
     }
 
-    // Always request non-stream first so we can properly read errors
     const isStreaming = body.stream === true;
-    body.stream = false; // Force non-stream to debug the 400
 
     const response = await axios({
       method: 'post',
@@ -59,42 +60,61 @@ app.post('/v1/chat/completions', async (req, res) => {
       headers: {
         'Authorization': `Bearer ${NIM_API_KEY}`,
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0'
+        'User-Agent': 'Mozilla/5.0',
+        ...(isStreaming ? { 'Accept': 'text/event-stream' } : {})
       },
       data: body,
-      timeout: 60000,
-      validateStatus: () => true,
-      responseType: 'text'   // Force text so we can always read the body
+      responseType: isStreaming ? 'stream' : 'json',
+      timeout: 180000,
+      validateStatus: () => true
     });
 
-    console.error('===== NVIDIA RESPONSE =====');
-    console.error('Status:', response.status);
-    console.error('Body:', response.data);
-    console.error('===========================');
-
     if (response.status !== 200) {
+      let errorMsg = 'Unknown NVIDIA error';
+
+      try {
+        if (typeof response.data === 'string') {
+          errorMsg = response.data;
+        } else if (response.data?.error?.message) {
+          errorMsg = response.data.error.message;
+        } else if (response.data?.message) {
+          errorMsg = response.data.message;
+        } else {
+          errorMsg = JSON.stringify(response.data).slice(0, 300);
+        }
+      } catch (e) {
+        errorMsg = `NVIDIA returned status ${response.status}`;
+      }
+
+      console.error(`NVIDIA ${response.status}:`, errorMsg);
+
       return res.status(response.status).json({
         error: {
-          message: response.data || `NVIDIA returned status ${response.status}`,
+          message: errorMsg,
           type: 'upstream_error',
           code: response.status
         }
       });
     }
 
-    // If we reach here, it worked (even though we forced non-stream for debugging)
-    try {
-      const jsonData = JSON.parse(response.data);
-      res.json(jsonData);
-    } catch (e) {
-      res.json({ error: { message: 'Failed to parse NVIDIA response' } });
+    if (isStreaming) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      response.data.pipe(res);
+    } else {
+      res.json(response.data);
     }
 
   } catch (err) {
-    console.error('Proxy error:', err.message);
+    // Safe error handling - never try to stringify circular objects
+    const safeMessage = err.message || 'Internal proxy error';
+    console.error('Proxy error:', safeMessage);
+
     res.status(500).json({
       error: {
-        message: err.message || 'Internal proxy error',
+        message: safeMessage,
         type: 'proxy_error',
         code: 500
       }
