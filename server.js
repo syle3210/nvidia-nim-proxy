@@ -12,7 +12,7 @@ const NIM_API_KEY = process.env.NIM_API_KEY || process.env.NVIDIA_API_KEY;
 const NIM_BASE = 'https://integrate.api.nvidia.com/v1';
 
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'Clean NIM Proxy' });
+  res.json({ status: 'ok', service: 'Clean NIM Proxy (Python-style)' });
 });
 
 app.get('/health', (req, res) => {
@@ -30,28 +30,28 @@ app.post('/v1/chat/completions', async (req, res) => {
     // Clean problematic fields
     delete body.extra_body;
     delete body.logit_bias;
-    delete body.presence_penalty;
-    delete body.frequency_penalty;
-    delete body.n;
-    delete body.seed;
 
     const modelName = (body.model || '').toLowerCase();
 
     // Gemma & MiniMax
     if (modelName.includes('gemma') || modelName.includes('minimax')) {
-      body.chat_template_kwargs = { enable_thinking: true };
+      body.chat_template_kwargs = {
+        enable_thinking: true
+      };
     }
 
-    // Kimi K3 - force correct locked parameters + reasoning
+    // Kimi K3
     if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
-      body.top_p = 0.95;               // Required by the model
-      body.temperature = 1.0;          // Usually required too
-      body.reasoning_effort = 'high';  // or "max"
+      body.reasoning_effort = 'high';
     }
 
-    // DeepSeek
+    // DeepSeek V4
     if (modelName.includes('deepseek')) {
       body.reasoning_effort = 'high';
+      // Some DeepSeek versions also respond to this
+      body.chat_template_kwargs = {
+        enable_thinking: true
+      };
     }
 
     const isStreaming = body.stream === true;
@@ -68,22 +68,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       data: body,
       responseType: isStreaming ? 'stream' : 'json',
       timeout: 180000,
-      validateStatus: () => true
     });
-
-    if (response.status !== 200) {
-      let errorMsg = 'Unknown error';
-      try {
-        errorMsg = typeof response.data === 'object' 
-          ? JSON.stringify(response.data) 
-          : String(response.data);
-      } catch (e) {}
-      
-      console.error('NVIDIA Error:', response.status, errorMsg);
-      return res.status(response.status).json({
-        error: { message: errorMsg, type: 'upstream_error', code: response.status }
-      });
-    }
 
     if (isStreaming) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -92,20 +77,27 @@ app.post('/v1/chat/completions', async (req, res) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
       response.data.pipe(res);
     } else {
-      // Try to surface reasoning if it exists
-      const data = response.data;
-      if (data?.choices?.[0]?.message?.reasoning_content) {
-        data.choices[0].message.content = 
-          `<think>\n${data.choices[0].message.reasoning_content}\n</think>\n\n` + 
-          (data.choices[0].message.content || '');
-      }
-      res.json(data);
+      res.json(response.data);
     }
 
   } catch (err) {
     console.error('Proxy error:', err.message);
-    res.status(500).json({
-      error: { message: err.message || 'Internal proxy error', type: 'proxy_error', code: 500 }
+
+    const status = err.response?.status || 500;
+    let message = err.message;
+
+    if (err.code === 'ECONNABORTED') {
+      message = 'Request timed out waiting for NVIDIA';
+    } else if (err.response?.data) {
+      message = err.response.data.error?.message || JSON.stringify(err.response.data);
+    }
+
+    res.status(status).json({
+      error: {
+        message: message,
+        type: 'upstream_error',
+        code: status
+      }
     });
   }
 });
