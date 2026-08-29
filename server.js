@@ -37,15 +37,17 @@ app.post('/v1/chat/completions', async (req, res) => {
 
     const modelName = (body.model || '').toLowerCase();
 
-    // Only add reasoning for models that need it
+    // Gemma & MiniMax
     if (modelName.includes('gemma') || modelName.includes('minimax')) {
       body.chat_template_kwargs = { enable_thinking: true };
     }
 
+    // Kimi K3 - only add reasoning_effort
     if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
       body.reasoning_effort = 'high';
     }
 
+    // DeepSeek
     if (modelName.includes('deepseek')) {
       body.reasoning_effort = 'high';
     }
@@ -68,7 +70,6 @@ app.post('/v1/chat/completions', async (req, res) => {
     });
 
     if (response.status !== 200) {
-      // Force show the full error
       let errorDetail = '';
       try {
         if (Buffer.isBuffer(response.data)) {
