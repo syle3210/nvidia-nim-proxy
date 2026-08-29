@@ -27,7 +27,7 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const body = { ...req.body };
 
-    // Clean common problematic fields
+    // Clean problematic fields
     delete body.extra_body;
     delete body.logit_bias;
     delete body.presence_penalty;
@@ -42,9 +42,11 @@ app.post('/v1/chat/completions', async (req, res) => {
       body.chat_template_kwargs = { enable_thinking: true };
     }
 
-    // Kimi K3 - only add reasoning_effort
+    // Kimi K3 - force correct locked parameters + reasoning
     if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
-      body.reasoning_effort = 'high';
+      body.top_p = 0.95;               // Required by the model
+      body.temperature = 1.0;          // Usually required too
+      body.reasoning_effort = 'high';  // or "max"
     }
 
     // DeepSeek
@@ -70,30 +72,16 @@ app.post('/v1/chat/completions', async (req, res) => {
     });
 
     if (response.status !== 200) {
-      let errorDetail = '';
+      let errorMsg = 'Unknown error';
       try {
-        if (Buffer.isBuffer(response.data)) {
-          errorDetail = response.data.toString();
-        } else if (typeof response.data === 'object') {
-          errorDetail = JSON.stringify(response.data, null, 2);
-        } else {
-          errorDetail = String(response.data);
-        }
-      } catch (e) {
-        errorDetail = 'Could not read error body';
-      }
-
-      console.error('===== FULL NVIDIA ERROR =====');
-      console.error('Status:', response.status);
-      console.error(errorDetail);
-      console.error('=============================');
-
+        errorMsg = typeof response.data === 'object' 
+          ? JSON.stringify(response.data) 
+          : String(response.data);
+      } catch (e) {}
+      
+      console.error('NVIDIA Error:', response.status, errorMsg);
       return res.status(response.status).json({
-        error: {
-          message: errorDetail.slice(0, 500) || `NVIDIA returned status ${response.status}`,
-          type: 'upstream_error',
-          code: response.status
-        }
+        error: { message: errorMsg, type: 'upstream_error', code: response.status }
       });
     }
 
@@ -104,17 +92,20 @@ app.post('/v1/chat/completions', async (req, res) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
       response.data.pipe(res);
     } else {
-      res.json(response.data);
+      // Try to surface reasoning if it exists
+      const data = response.data;
+      if (data?.choices?.[0]?.message?.reasoning_content) {
+        data.choices[0].message.content = 
+          `<think>\n${data.choices[0].message.reasoning_content}\n</think>\n\n` + 
+          (data.choices[0].message.content || '');
+      }
+      res.json(data);
     }
 
   } catch (err) {
     console.error('Proxy error:', err.message);
     res.status(500).json({
-      error: {
-        message: err.message || 'Internal proxy error',
-        type: 'proxy_error',
-        code: 500
-      }
+      error: { message: err.message || 'Internal proxy error', type: 'proxy_error', code: 500 }
     });
   }
 });
