@@ -12,7 +12,7 @@ const NIM_API_KEY = process.env.NIM_API_KEY || process.env.NVIDIA_API_KEY;
 const NIM_BASE = 'https://integrate.api.nvidia.com/v1';
 
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'Clean NIM Proxy' });
+  res.json({ status: 'ok', service: 'NIM Proxy' });
 });
 
 app.get('/health', (req, res) => {
@@ -27,27 +27,21 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const body = { ...req.body };
 
-    // Clean common problematic fields
+    // Light cleaning
     delete body.extra_body;
     delete body.logit_bias;
-    delete body.presence_penalty;
-    delete body.frequency_penalty;
-    delete body.n;
-    delete body.seed;
 
     const modelName = (body.model || '').toLowerCase();
 
-    // Gemma & MiniMax
+    // Thinking / Reasoning
     if (modelName.includes('gemma') || modelName.includes('minimax')) {
       body.chat_template_kwargs = { enable_thinking: true };
     }
 
-    // Kimi K3 - only add reasoning_effort
     if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
-      body.reasoning_effort = 'high';
+      body.reasoning_effort = 'max';
     }
 
-    // DeepSeek
     if (modelName.includes('deepseek')) {
       body.reasoning_effort = 'high';
     }
@@ -60,42 +54,12 @@ app.post('/v1/chat/completions', async (req, res) => {
       headers: {
         'Authorization': `Bearer ${NIM_API_KEY}`,
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0',
         ...(isStreaming ? { 'Accept': 'text/event-stream' } : {})
       },
       data: body,
       responseType: isStreaming ? 'stream' : 'json',
       timeout: 180000,
-      validateStatus: () => true
     });
-
-    if (response.status !== 200) {
-      let errorDetail = '';
-      try {
-        if (Buffer.isBuffer(response.data)) {
-          errorDetail = response.data.toString();
-        } else if (typeof response.data === 'object') {
-          errorDetail = JSON.stringify(response.data, null, 2);
-        } else {
-          errorDetail = String(response.data);
-        }
-      } catch (e) {
-        errorDetail = 'Could not read error body';
-      }
-
-      console.error('===== FULL NVIDIA ERROR =====');
-      console.error('Status:', response.status);
-      console.error(errorDetail);
-      console.error('=============================');
-
-      return res.status(response.status).json({
-        error: {
-          message: errorDetail.slice(0, 500) || `NVIDIA returned status ${response.status}`,
-          type: 'upstream_error',
-          code: response.status
-        }
-      });
-    }
 
     if (isStreaming) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -109,16 +73,28 @@ app.post('/v1/chat/completions', async (req, res) => {
 
   } catch (err) {
     console.error('Proxy error:', err.message);
-    res.status(500).json({
+
+    const status = err.response?.status || 500;
+    let message = err.message;
+
+    if (err.response?.data) {
+      try {
+        message = err.response.data.error?.message || JSON.stringify(err.response.data);
+      } catch (e) {
+        message = err.message;
+      }
+    }
+
+    res.status(status).json({
       error: {
-        message: err.message || 'Internal proxy error',
-        type: 'proxy_error',
-        code: 500
+        message: message,
+        type: 'upstream_error',
+        code: status
       }
     });
   }
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Clean NIM Proxy running on port ${PORT}`);
+  console.log(`NIM Proxy running on port ${PORT}`);
 });
