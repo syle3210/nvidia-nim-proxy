@@ -27,7 +27,7 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const body = { ...req.body };
 
-    // Remove fields that often cause 400s
+    // Clean fields that often cause problems
     delete body.extra_body;
     delete body.logit_bias;
     delete body.presence_penalty;
@@ -66,13 +66,27 @@ app.post('/v1/chat/completions', async (req, res) => {
       data: body,
       responseType: isStreaming ? 'stream' : 'json',
       timeout: 180000,
-      validateStatus: () => true // Don't throw on 4xx/5xx
+      validateStatus: () => true
     });
 
-    // Handle non-200 responses cleanly
     if (response.status !== 200) {
-      const errorMsg = response.data?.error?.message || response.data?.message || JSON.stringify(response.data) || 'Unknown error';
-      console.error(`NVIDIA returned ${response.status}:`, errorMsg);
+      let errorMsg = 'Unknown NVIDIA error';
+
+      try {
+        if (typeof response.data === 'string') {
+          errorMsg = response.data;
+        } else if (response.data?.error?.message) {
+          errorMsg = response.data.error.message;
+        } else if (response.data?.message) {
+          errorMsg = response.data.message;
+        } else {
+          errorMsg = JSON.stringify(response.data).slice(0, 300);
+        }
+      } catch (e) {
+        errorMsg = `NVIDIA returned status ${response.status}`;
+      }
+
+      console.error(`NVIDIA ${response.status}:`, errorMsg);
 
       return res.status(response.status).json({
         error: {
@@ -94,11 +108,13 @@ app.post('/v1/chat/completions', async (req, res) => {
     }
 
   } catch (err) {
-    console.error('Proxy error:', err.message);
+    // Safe error handling - never try to stringify circular objects
+    const safeMessage = err.message || 'Internal proxy error';
+    console.error('Proxy error:', safeMessage);
 
     res.status(500).json({
       error: {
-        message: err.message || 'Internal proxy error',
+        message: safeMessage,
         type: 'proxy_error',
         code: 500
       }
