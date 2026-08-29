@@ -12,7 +12,7 @@ const NIM_API_KEY = process.env.NIM_API_KEY || process.env.NVIDIA_API_KEY;
 const NIM_BASE = 'https://integrate.api.nvidia.com/v1';
 
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'Clean NIM Proxy (Python-style)' });
+  res.json({ status: 'ok', service: 'Clean NIM Proxy' });
 });
 
 app.get('/health', (req, res) => {
@@ -27,26 +27,29 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const body = { ...req.body };
 
-    // Clean problematic fields
+    // Remove fields that commonly cause 400s
     delete body.extra_body;
     delete body.logit_bias;
+    delete body.presence_penalty;
+    delete body.frequency_penalty;
+    delete body.n;
 
     const modelName = (body.model || '').toLowerCase();
 
     // Gemma & MiniMax
     if (modelName.includes('gemma') || modelName.includes('minimax')) {
-      body.chat_template_kwargs = {
-        enable_thinking: true
-      };
+      body.chat_template_kwargs = { enable_thinking: true };
     }
 
-    // DeepSeek V4
+    // Kimi K3 - keep it very clean
+    if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
+      body.reasoning_effort = 'high';   // or "max"
+      // Do NOT send chat_template_kwargs for Kimi K3
+    }
+
+    // DeepSeek
     if (modelName.includes('deepseek')) {
-      body.reasoning_effort = 'low';
-      // Some DeepSeek versions also respond to this
-      body.chat_template_kwargs = {
-        enable_thinking: true
-      };
+      body.reasoning_effort = 'high';
     }
 
     const isStreaming = body.stream === true;
@@ -81,9 +84,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     const status = err.response?.status || 500;
     let message = err.message;
 
-    if (err.code === 'ECONNABORTED') {
-      message = 'Request timed out waiting for NVIDIA';
-    } else if (err.response?.data) {
+    if (err.response?.data) {
       message = err.response.data.error?.message || JSON.stringify(err.response.data);
     }
 
