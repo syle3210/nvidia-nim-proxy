@@ -27,7 +27,7 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const body = { ...req.body };
 
-    // Clean fields that often cause problems
+    // Clean common problematic fields
     delete body.extra_body;
     delete body.logit_bias;
     delete body.presence_penalty;
@@ -37,17 +37,15 @@ app.post('/v1/chat/completions', async (req, res) => {
 
     const modelName = (body.model || '').toLowerCase();
 
-    // Gemma & MiniMax
+    // Only add reasoning for models that need it
     if (modelName.includes('gemma') || modelName.includes('minimax')) {
       body.chat_template_kwargs = { enable_thinking: true };
     }
 
-    // Kimi K3
     if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
       body.reasoning_effort = 'high';
     }
 
-    // DeepSeek
     if (modelName.includes('deepseek')) {
       body.reasoning_effort = 'high';
     }
@@ -70,27 +68,28 @@ app.post('/v1/chat/completions', async (req, res) => {
     });
 
     if (response.status !== 200) {
-      let errorMsg = 'Unknown NVIDIA error';
-
+      // Force show the full error
+      let errorDetail = '';
       try {
-        if (typeof response.data === 'string') {
-          errorMsg = response.data;
-        } else if (response.data?.error?.message) {
-          errorMsg = response.data.error.message;
-        } else if (response.data?.message) {
-          errorMsg = response.data.message;
+        if (Buffer.isBuffer(response.data)) {
+          errorDetail = response.data.toString();
+        } else if (typeof response.data === 'object') {
+          errorDetail = JSON.stringify(response.data, null, 2);
         } else {
-          errorMsg = JSON.stringify(response.data).slice(0, 300);
+          errorDetail = String(response.data);
         }
       } catch (e) {
-        errorMsg = `NVIDIA returned status ${response.status}`;
+        errorDetail = 'Could not read error body';
       }
 
-      console.error(`NVIDIA ${response.status}:`, errorMsg);
+      console.error('===== FULL NVIDIA ERROR =====');
+      console.error('Status:', response.status);
+      console.error(errorDetail);
+      console.error('=============================');
 
       return res.status(response.status).json({
         error: {
-          message: errorMsg,
+          message: errorDetail.slice(0, 500) || `NVIDIA returned status ${response.status}`,
           type: 'upstream_error',
           code: response.status
         }
@@ -108,13 +107,10 @@ app.post('/v1/chat/completions', async (req, res) => {
     }
 
   } catch (err) {
-    // Safe error handling - never try to stringify circular objects
-    const safeMessage = err.message || 'Internal proxy error';
-    console.error('Proxy error:', safeMessage);
-
+    console.error('Proxy error:', err.message);
     res.status(500).json({
       error: {
-        message: safeMessage,
+        message: err.message || 'Internal proxy error',
         type: 'proxy_error',
         code: 500
       }
