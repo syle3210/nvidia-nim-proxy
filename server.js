@@ -27,12 +27,13 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const body = { ...req.body };
 
-    // Remove fields that commonly cause 400s
+    // Remove fields that often cause 400s
     delete body.extra_body;
     delete body.logit_bias;
     delete body.presence_penalty;
     delete body.frequency_penalty;
     delete body.n;
+    delete body.seed;
 
     const modelName = (body.model || '').toLowerCase();
 
@@ -41,10 +42,9 @@ app.post('/v1/chat/completions', async (req, res) => {
       body.chat_template_kwargs = { enable_thinking: true };
     }
 
-    // Kimi K3 - keep it very clean
+    // Kimi K3
     if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
-      body.reasoning_effort = 'high';   // or "max"
-      // Do NOT send chat_template_kwargs for Kimi K3
+      body.reasoning_effort = 'high';
     }
 
     // DeepSeek
@@ -66,7 +66,22 @@ app.post('/v1/chat/completions', async (req, res) => {
       data: body,
       responseType: isStreaming ? 'stream' : 'json',
       timeout: 180000,
+      validateStatus: () => true // Don't throw on 4xx/5xx
     });
+
+    // Handle non-200 responses cleanly
+    if (response.status !== 200) {
+      const errorMsg = response.data?.error?.message || response.data?.message || JSON.stringify(response.data) || 'Unknown error';
+      console.error(`NVIDIA returned ${response.status}:`, errorMsg);
+
+      return res.status(response.status).json({
+        error: {
+          message: errorMsg,
+          type: 'upstream_error',
+          code: response.status
+        }
+      });
+    }
 
     if (isStreaming) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -81,18 +96,11 @@ app.post('/v1/chat/completions', async (req, res) => {
   } catch (err) {
     console.error('Proxy error:', err.message);
 
-    const status = err.response?.status || 500;
-    let message = err.message;
-
-    if (err.response?.data) {
-      message = err.response.data.error?.message || JSON.stringify(err.response.data);
-    }
-
-    res.status(status).json({
+    res.status(500).json({
       error: {
-        message: message,
-        type: 'upstream_error',
-        code: status
+        message: err.message || 'Internal proxy error',
+        type: 'proxy_error',
+        code: 500
       }
     });
   }
