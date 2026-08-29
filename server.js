@@ -27,7 +27,7 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const body = { ...req.body };
 
-    // Clean common problematic fields
+    // Clean problematic fields
     delete body.extra_body;
     delete body.logit_bias;
     delete body.presence_penalty;
@@ -37,7 +37,6 @@ app.post('/v1/chat/completions', async (req, res) => {
 
     const modelName = (body.model || '').toLowerCase();
 
-    // Only add reasoning for models that need it
     if (modelName.includes('gemma') || modelName.includes('minimax')) {
       body.chat_template_kwargs = { enable_thinking: true };
     }
@@ -50,7 +49,9 @@ app.post('/v1/chat/completions', async (req, res) => {
       body.reasoning_effort = 'high';
     }
 
+    // Always request non-stream first so we can properly read errors
     const isStreaming = body.stream === true;
+    body.stream = false; // Force non-stream to debug the 400
 
     const response = await axios({
       method: 'post',
@@ -58,52 +59,35 @@ app.post('/v1/chat/completions', async (req, res) => {
       headers: {
         'Authorization': `Bearer ${NIM_API_KEY}`,
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0',
-        ...(isStreaming ? { 'Accept': 'text/event-stream' } : {})
+        'User-Agent': 'Mozilla/5.0'
       },
       data: body,
-      responseType: isStreaming ? 'stream' : 'json',
-      timeout: 180000,
-      validateStatus: () => true
+      timeout: 60000,
+      validateStatus: () => true,
+      responseType: 'text'   // Force text so we can always read the body
     });
 
+    console.error('===== NVIDIA RESPONSE =====');
+    console.error('Status:', response.status);
+    console.error('Body:', response.data);
+    console.error('===========================');
+
     if (response.status !== 200) {
-      // Force show the full error
-      let errorDetail = '';
-      try {
-        if (Buffer.isBuffer(response.data)) {
-          errorDetail = response.data.toString();
-        } else if (typeof response.data === 'object') {
-          errorDetail = JSON.stringify(response.data, null, 2);
-        } else {
-          errorDetail = String(response.data);
-        }
-      } catch (e) {
-        errorDetail = 'Could not read error body';
-      }
-
-      console.error('===== FULL NVIDIA ERROR =====');
-      console.error('Status:', response.status);
-      console.error(errorDetail);
-      console.error('=============================');
-
       return res.status(response.status).json({
         error: {
-          message: errorDetail.slice(0, 500) || `NVIDIA returned status ${response.status}`,
+          message: response.data || `NVIDIA returned status ${response.status}`,
           type: 'upstream_error',
           code: response.status
         }
       });
     }
 
-    if (isStreaming) {
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      response.data.pipe(res);
-    } else {
-      res.json(response.data);
+    // If we reach here, it worked (even though we forced non-stream for debugging)
+    try {
+      const jsonData = JSON.parse(response.data);
+      res.json(jsonData);
+    } catch (e) {
+      res.json({ error: { message: 'Failed to parse NVIDIA response' } });
     }
 
   } catch (err) {
