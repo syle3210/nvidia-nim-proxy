@@ -33,18 +33,14 @@ app.post('/v1/chat/completions', async (req, res) => {
 
     const modelName = (body.model || '').toLowerCase();
 
-    // Only force thinking on models that need the old method
+    // Only these two
     if (modelName.includes('gemma') || modelName.includes('minimax')) {
       body.chat_template_kwargs = { enable_thinking: true };
     }
 
-    // DeepSeek only
     if (modelName.includes('deepseek')) {
       body.reasoning_effort = 'high';
     }
-
-    // Kimi K3 → send nothing extra (completely clean)
-    // (We removed reasoning_effort temporarily for testing)
 
     const isStreaming = body.stream === true;
 
