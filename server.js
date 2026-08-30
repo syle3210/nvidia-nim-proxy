@@ -27,24 +27,24 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const body = { ...req.body };
 
-    // Light cleaning
+    // Minimal cleaning
     delete body.extra_body;
     delete body.logit_bias;
 
     const modelName = (body.model || '').toLowerCase();
 
-    // Thinking / Reasoning
+    // Only force thinking on models that need the old method
     if (modelName.includes('gemma') || modelName.includes('minimax')) {
       body.chat_template_kwargs = { enable_thinking: true };
     }
 
-    if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
-      body.reasoning_effort = 'max';
-    }
-
+    // DeepSeek only
     if (modelName.includes('deepseek')) {
       body.reasoning_effort = 'high';
     }
+
+    // Kimi K3 → send nothing extra (completely clean)
+    // (We removed reasoning_effort temporarily for testing)
 
     const isStreaming = body.stream === true;
 
