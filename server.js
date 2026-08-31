@@ -46,7 +46,7 @@ app.post('/v1/chat/completions', async (req, res) => {
 
     // Kimi K3 - max effort
     if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
-      body.reasoning_effort = 'high';
+      body.reasoning_effort = 'medium';
     }
 
     // DeepSeek
