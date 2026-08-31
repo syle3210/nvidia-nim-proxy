@@ -44,10 +44,12 @@ app.post('/v1/chat/completions', async (req, res) => {
       body.chat_template_kwargs = { enable_thinking: true };
     }
 
+    // Kimi K3
     if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
       body.reasoning_effort = 'high';
     }
 
+    // DeepSeek
     if (modelName.includes('deepseek')) {
       body.reasoning_effort = 'high';
     }
@@ -65,7 +67,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       },
       data: body,
       responseType: isStreaming ? 'stream' : 'json',
-      timeout: 180000, // 3 minutes
+      timeout: 180000,
       validateStatus: () => true
     });
 
