@@ -19,7 +19,16 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', keyConfigured: !!NIM_API_KEY });
 });
 
+// Log every request that hits the server
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
+
 app.post('/v1/chat/completions', async (req, res) => {
+  console.log('>>> Received /v1/chat/completions request');
+  console.log('Model:', req.body?.model);
+
   if (!NIM_API_KEY) {
     return res.status(500).json({ error: { message: 'NIM_API_KEY not set' } });
   }
@@ -27,13 +36,11 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const body = { ...req.body };
 
-    // Minimal cleaning
     delete body.extra_body;
     delete body.logit_bias;
 
     const modelName = (body.model || '').toLowerCase();
 
-    // Only these two
     if (modelName.includes('gemma') || modelName.includes('minimax')) {
       body.chat_template_kwargs = { enable_thinking: true };
     }
