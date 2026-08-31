@@ -44,7 +44,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       body.chat_template_kwargs = { enable_thinking: true };
     }
 
-    // Kimi K3
+    // Kimi K3 - max effort
     if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
       body.reasoning_effort = 'max';
     }
@@ -97,13 +97,26 @@ app.post('/v1/chat/completions', async (req, res) => {
     }
 
     if (isStreaming) {
+      // Streaming - just pass through for now
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('Access-Control-Allow-Origin', '*');
       response.data.pipe(res);
     } else {
-      res.json(response.data);
+      // Non-streaming: inject reasoning into the visible content
+      const data = response.data;
+
+      if (data?.choices?.[0]?.message) {
+        const msg = data.choices[0].message;
+        const reasoning = msg.reasoning_content || msg.reasoning || '';
+
+        if (reasoning && reasoning.trim().length > 0) {
+          msg.content = `<think>\n\( {reasoning.trim()}\n</think>\n\n \){msg.content || ''}`;
+        }
+      }
+
+      res.json(data);
     }
 
   } catch (err) {
