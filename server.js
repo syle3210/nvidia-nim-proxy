@@ -12,23 +12,14 @@ const NIM_API_KEY = process.env.NIM_API_KEY || process.env.NVIDIA_API_KEY;
 const NIM_BASE = 'https://integrate.api.nvidia.com/v1';
 
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'NIM Proxy' });
+  res.json({ status: 'ok', service: 'Clean NIM Proxy' });
 });
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', keyConfigured: !!NIM_API_KEY });
 });
 
-// Log every request that hits the server
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-  next();
-});
-
 app.post('/v1/chat/completions', async (req, res) => {
-  console.log('>>> Received /v1/chat/completions request');
-  console.log('Model:', req.body?.model);
-
   if (!NIM_API_KEY) {
     return res.status(500).json({ error: { message: 'NIM_API_KEY not set' } });
   }
@@ -36,8 +27,13 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const body = { ...req.body };
 
+    // Clean problematic fields
     delete body.extra_body;
     delete body.logit_bias;
+    delete body.presence_penalty;
+    delete body.frequency_penalty;
+    delete body.n;
+    delete body.seed;
 
     const modelName = (body.model || '').toLowerCase();
 
@@ -45,11 +41,17 @@ app.post('/v1/chat/completions', async (req, res) => {
       body.chat_template_kwargs = { enable_thinking: true };
     }
 
+    if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
+      body.reasoning_effort = 'high';
+    }
+
     if (modelName.includes('deepseek')) {
       body.reasoning_effort = 'high';
     }
 
+    // Always request non-stream first so we can properly read errors
     const isStreaming = body.stream === true;
+    body.stream = false; // Force non-stream to debug the 400
 
     const response = await axios({
       method: 'post',
@@ -57,47 +59,49 @@ app.post('/v1/chat/completions', async (req, res) => {
       headers: {
         'Authorization': `Bearer ${NIM_API_KEY}`,
         'Content-Type': 'application/json',
-        ...(isStreaming ? { 'Accept': 'text/event-stream' } : {})
+        'User-Agent': 'Mozilla/5.0'
       },
       data: body,
-      responseType: isStreaming ? 'stream' : 'json',
-      timeout: 180000,
+      timeout: 60000,
+      validateStatus: () => true,
+      responseType: 'text'   // Force text so we can always read the body
     });
 
-    if (isStreaming) {
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      response.data.pipe(res);
-    } else {
-      res.json(response.data);
+    console.error('===== NVIDIA RESPONSE =====');
+    console.error('Status:', response.status);
+    console.error('Body:', response.data);
+    console.error('===========================');
+
+    if (response.status !== 200) {
+      return res.status(response.status).json({
+        error: {
+          message: response.data || `NVIDIA returned status ${response.status}`,
+          type: 'upstream_error',
+          code: response.status
+        }
+      });
+    }
+
+    // If we reach here, it worked (even though we forced non-stream for debugging)
+    try {
+      const jsonData = JSON.parse(response.data);
+      res.json(jsonData);
+    } catch (e) {
+      res.json({ error: { message: 'Failed to parse NVIDIA response' } });
     }
 
   } catch (err) {
     console.error('Proxy error:', err.message);
-
-    const status = err.response?.status || 500;
-    let message = err.message;
-
-    if (err.response?.data) {
-      try {
-        message = err.response.data.error?.message || JSON.stringify(err.response.data);
-      } catch (e) {
-        message = err.message;
-      }
-    }
-
-    res.status(status).json({
+    res.status(500).json({
       error: {
-        message: message,
-        type: 'upstream_error',
-        code: status
+        message: err.message || 'Internal proxy error',
+        type: 'proxy_error',
+        code: 500
       }
     });
   }
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`NIM Proxy running on port ${PORT}`);
+  console.log(`Clean NIM Proxy running on port ${PORT}`);
 });
