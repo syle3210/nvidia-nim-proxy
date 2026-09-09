@@ -51,7 +51,7 @@ app.post('/v1/chat/completions', async (req, res) => {
 
     // DeepSeek
     if (modelName.includes('deepseek')) {
-      body.reasoning_effort = 'high';
+      body.reasoning_effort = 'max';
     }
 
     const isStreaming = body.stream === true;
