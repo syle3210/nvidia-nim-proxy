@@ -6,7 +6,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '150mb' }));
 
 const NIM_API_KEY = process.env.NIM_API_KEY || process.env.NVIDIA_API_KEY;
 const NIM_BASE = 'https://integrate.api.nvidia.com/v1';
@@ -40,7 +40,12 @@ app.post('/v1/chat/completions', async (req, res) => {
     const modelName = (body.model || '').toLowerCase();
 
     // Thinking / Reasoning
-    
+
+    // Kimi K3 - max effort
+    if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
+      body.reasoning_effort = 'high';
+    }
+
     // DeepSeek
     if (modelName.includes('deepseek')) {
       body.reasoning_effort = 'high';
