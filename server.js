@@ -40,12 +40,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     const modelName = (body.model || '').toLowerCase();
 
     // Thinking / Reasoning
-
-    // Kimi K3 - max effort
-    if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
-      body.reasoning_effort = 'high';
-    }
-
+    
     // DeepSeek
     if (modelName.includes('deepseek')) {
       body.reasoning_effort = 'high';
