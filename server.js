@@ -96,6 +96,30 @@ function monitorKimiStream(stream) {
     const content =
       delta.content ||
       '';
+    const lowerContent = content.toLowerCase();
+
+if (
+  lowerContent.includes('<think>') ||
+  lowerContent.includes('</think>')
+) {
+  console.log(
+    '!!!!!!!! KIMI THINK TAG DETECTED IN CONTENT !!!!!!!!'
+  );
+
+  console.log(
+    'Contains <think>:',
+    lowerContent.includes('<think>')
+  );
+
+  console.log(
+    'Contains </think>:',
+    lowerContent.includes('</think>')
+  );
+
+  console.log(
+    '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+  );
+}
 
 
     // --------------------------------------------------------
