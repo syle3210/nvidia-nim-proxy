@@ -417,15 +417,29 @@ app.post(
         );
 
         console.log(
-          '>>> max_tokens:',
-          body.max_tokens
-        );
+  '>>> max_tokens:',
+  body.max_tokens
+);
 
-        console.log(
-          '>>> temperature:',
-          body.temperature
-        );
-      }
+console.log(
+  '>>> max_completion_tokens:',
+  body.max_completion_tokens
+);
+
+console.log(
+  '>>> temperature:',
+  body.temperature
+);
+
+console.log(
+  '>>> stream_options:',
+  body.stream_options
+);
+
+console.log(
+  '>>> stop:',
+  body.stop
+);
 
 
       // ======================================================
