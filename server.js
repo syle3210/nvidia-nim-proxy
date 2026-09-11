@@ -22,7 +22,7 @@ const NIM_BASE =
 app.get('/', (req, res) => {
   res.json({
     status: 'ok',
-    service: 'Clean NIM Proxy - Diagnostic'
+    service: 'NVIDIA NIM Proxy - Kimi Diagnostic'
   });
 });
 
@@ -36,10 +36,14 @@ app.get('/health', (req, res) => {
 
 // ============================================================
 // KIMI STREAM DIAGNOSTIC
-// IMPORTANT: THIS DOES NOT MODIFY THE STREAM
+//
+// IMPORTANT:
+// This function ONLY watches the stream.
+// It does NOT modify what JanitorAI receives.
 // ============================================================
 
 function monitorKimiStream(stream) {
+
   let buffer = '';
 
   let chunkCount = 0;
@@ -48,8 +52,11 @@ function monitorKimiStream(stream) {
 
   let firstChunkLogged = false;
   let firstReasoningLogged = false;
+  let thinkTagLogged = false;
+
 
   function processLine(line) {
+
     const trimmed = line.trim();
 
     if (!trimmed) {
@@ -66,6 +73,7 @@ function monitorKimiStream(stream) {
       return;
     }
 
+
     let data;
 
     try {
@@ -74,19 +82,25 @@ function monitorKimiStream(stream) {
       return;
     }
 
+
     chunkCount++;
 
-    const choice = data?.choices?.[0];
+
+    const choice =
+      data?.choices?.[0];
 
     if (!choice) {
       return;
     }
 
-    const delta = choice.delta;
+
+    const delta =
+      choice.delta;
 
     if (!delta) {
       return;
     }
+
 
     const reasoning =
       delta.reasoning_content ||
@@ -96,37 +110,14 @@ function monitorKimiStream(stream) {
     const content =
       delta.content ||
       '';
-    const lowerContent = content.toLowerCase();
-
-if (
-  lowerContent.includes('<think>') ||
-  lowerContent.includes('</think>')
-) {
-  console.log(
-    '!!!!!!!! KIMI THINK TAG DETECTED IN CONTENT !!!!!!!!'
-  );
-
-  console.log(
-    'Contains <think>:',
-    lowerContent.includes('<think>')
-  );
-
-  console.log(
-    'Contains </think>:',
-    lowerContent.includes('</think>')
-  );
-
-  console.log(
-    '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-  );
-}
 
 
-    // --------------------------------------------------------
-    // FIRST CHUNK
-    // --------------------------------------------------------
+    // ========================================================
+    // FIRST STREAM CHUNK
+    // ========================================================
 
     if (!firstChunkLogged) {
+
       firstChunkLogged = true;
 
       console.log(
@@ -168,15 +159,17 @@ if (
     }
 
 
-    // --------------------------------------------------------
-    // REASONING DETECTED
-    // --------------------------------------------------------
+    // ========================================================
+    // REASONING CONTENT
+    // ========================================================
 
     if (reasoning.length > 0) {
 
       reasoningChunks++;
 
+
       if (!firstReasoningLogged) {
+
         firstReasoningLogged = true;
 
         console.log(
@@ -184,7 +177,7 @@ if (
         );
 
         console.log(
-          'reasoning field:',
+          'Reasoning field:',
           Object.prototype.hasOwnProperty.call(
             delta,
             'reasoning_content'
@@ -194,7 +187,7 @@ if (
         );
 
         console.log(
-          'reasoning length:',
+          'First reasoning chunk length:',
           reasoning.length
         );
 
@@ -205,15 +198,53 @@ if (
     }
 
 
-    // --------------------------------------------------------
-    // NORMAL CONTENT
-    // --------------------------------------------------------
+    // ========================================================
+    // THINK TAG INSIDE NORMAL CONTENT
+    // ========================================================
 
     if (content.length > 0) {
+
       contentChunks++;
+
+      const lowerContent =
+        content.toLowerCase();
+
+
+      if (
+        !thinkTagLogged &&
+        (
+          lowerContent.includes('<think>') ||
+          lowerContent.includes('</think>')
+        )
+      ) {
+
+        thinkTagLogged = true;
+
+        console.log(
+          '!!!!!!!! KIMI THINK TAG DETECTED IN CONTENT !!!!!!!!'
+        );
+
+        console.log(
+          'Contains <think>:',
+          lowerContent.includes('<think>')
+        );
+
+        console.log(
+          'Contains </think>:',
+          lowerContent.includes('</think>')
+        );
+
+        console.log(
+          '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+        );
+      }
     }
   }
 
+
+  // ==========================================================
+  // RECEIVE STREAM
+  // ==========================================================
 
   stream.on('data', chunk => {
 
@@ -222,8 +253,10 @@ if (
     const lines =
       buffer.split(/\r?\n/);
 
+    // Keep incomplete SSE line
     buffer =
       lines.pop() || '';
+
 
     for (const line of lines) {
       processLine(line);
@@ -231,11 +264,16 @@ if (
   });
 
 
+  // ==========================================================
+  // STREAM FINISHED
+  // ==========================================================
+
   stream.on('end', () => {
 
     if (buffer.trim()) {
       processLine(buffer);
     }
+
 
     console.log(
       '========== KIMI STREAM SUMMARY =========='
@@ -258,7 +296,16 @@ if (
 
     console.log(
       'Reasoning received:',
-      reasoningChunks > 0 ? 'YES' : 'NO'
+      reasoningChunks > 0
+        ? 'YES'
+        : 'NO'
+    );
+
+    console.log(
+      'Think tag found in content:',
+      thinkTagLogged
+        ? 'YES'
+        : 'NO'
     );
 
     console.log(
@@ -266,6 +313,10 @@ if (
     );
   });
 
+
+  // ==========================================================
+  // STREAM ERROR
+  // ==========================================================
 
   stream.on('error', error => {
 
@@ -294,11 +345,13 @@ app.post(
       req.body?.model
     );
 
+
     if (!NIM_API_KEY) {
 
       return res.status(500).json({
         error: {
-          message: 'NIM_API_KEY not set'
+          message:
+            'NIM_API_KEY not set'
         }
       });
     }
@@ -311,9 +364,9 @@ app.post(
       };
 
 
-      // ------------------------------------------------------
+      // ======================================================
       // REMOVE UNSUPPORTED FIELDS
-      // ------------------------------------------------------
+      // ======================================================
 
       delete body.extra_body;
       delete body.logit_bias;
@@ -329,9 +382,9 @@ app.post(
         ).toLowerCase();
 
 
-      // ------------------------------------------------------
+      // ======================================================
       // KIMI K3
-      // ------------------------------------------------------
+      // ======================================================
 
       const isKimi =
         modelName.includes('kimi-k3') ||
@@ -340,7 +393,14 @@ app.post(
 
       if (isKimi) {
 
+        // ONLY FORCE REASONING MODE.
+        //
+        // temperature remains controlled by JanitorAI.
+        // max_tokens remains controlled by JanitorAI.
+        // stream remains controlled by JanitorAI.
+
         body.reasoning_effort = 'max';
+
 
         console.log(
           '>>> KIMI K3 DETECTED'
@@ -368,15 +428,16 @@ app.post(
       }
 
 
-      // ------------------------------------------------------
+      // ======================================================
       // DEEPSEEK
-      // ------------------------------------------------------
+      // ======================================================
 
       if (
         modelName.includes('deepseek')
       ) {
 
         body.reasoning_effort = 'high';
+
 
         console.log(
           '>>> DeepSeek detected'
@@ -388,9 +449,9 @@ app.post(
       }
 
 
-      // ------------------------------------------------------
+      // ======================================================
       // OTHER THINKING MODELS
-      // ------------------------------------------------------
+      // ======================================================
 
       if (
         modelName.includes('gemma') ||
@@ -407,17 +468,19 @@ app.post(
         body.stream === true;
 
 
-      // ------------------------------------------------------
-      // SEND TO NVIDIA
-      // ------------------------------------------------------
+      // ======================================================
+      // SEND REQUEST TO NVIDIA
+      // ======================================================
 
       const response = await axios({
+
         method: 'post',
 
         url:
           `${NIM_BASE}/chat/completions`,
 
         headers: {
+
           'Authorization':
             `Bearer ${NIM_API_KEY}`,
 
@@ -449,9 +512,9 @@ app.post(
       });
 
 
-      // ------------------------------------------------------
+      // ======================================================
       // NVIDIA ERROR
-      // ------------------------------------------------------
+      // ======================================================
 
       if (
         response.status !== 200
@@ -459,6 +522,7 @@ app.post(
 
         let errorMessage =
           'Unknown NVIDIA error';
+
 
         try {
 
@@ -502,7 +566,9 @@ app.post(
         return res.status(
           response.status
         ).json({
+
           error: {
+
             message:
               errorMessage,
 
@@ -517,12 +583,13 @@ app.post(
 
 
       // ======================================================
-      // STREAMING
+      // STREAMING RESPONSE
       // ======================================================
 
       if (isStreaming) {
 
         res.statusCode = 200;
+
 
         res.setHeader(
           'Content-Type',
@@ -554,6 +621,7 @@ app.post(
           typeof res.flushHeaders ===
           'function'
         ) {
+
           res.flushHeaders();
         }
 
@@ -566,7 +634,7 @@ app.post(
         // ----------------------------------------------------
         // KIMI DIAGNOSTIC
         //
-        // Monitor the stream WITHOUT modifying it.
+        // Watch the stream, but DO NOT modify it.
         // ----------------------------------------------------
 
         if (isKimi) {
@@ -582,7 +650,7 @@ app.post(
 
 
         // ----------------------------------------------------
-        // PASS THE ORIGINAL NVIDIA STREAM THROUGH
+        // PASS NVIDIA RESPONSE THROUGH UNCHANGED
         // ----------------------------------------------------
 
         response.data.pipe(res);
@@ -599,15 +667,26 @@ app.post(
         response.data;
 
 
+      // ------------------------------------------------------
+      // KIMI NON-STREAM DIAGNOSTIC
+      // ------------------------------------------------------
+
       if (isKimi) {
 
         const message =
           data?.choices?.[0]?.message;
 
+
         const reasoning =
           message?.reasoning_content ||
           message?.reasoning ||
           '';
+
+
+        const content =
+          message?.content ||
+          '';
+
 
         console.log(
           '========== KIMI NON-STREAM =========='
@@ -626,13 +705,18 @@ app.post(
         );
 
         console.log(
+          'Content length:',
+          content.length
+        );
+
+        console.log(
           '======================================'
         );
       }
 
 
       // ------------------------------------------------------
-      // DO NOT MODIFY THE RESPONSE
+      // DO NOT MODIFY RESPONSE
       // ------------------------------------------------------
 
       res.json(data);
@@ -648,7 +732,9 @@ app.post(
       if (!res.headersSent) {
 
         res.status(500).json({
+
           error: {
+
             message:
               error.message ||
               'Internal proxy error',
