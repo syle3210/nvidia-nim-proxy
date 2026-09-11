@@ -8,8 +8,13 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-const NIM_API_KEY = process.env.NIM_API_KEY || process.env.NVIDIA_API_KEY;
-const NIM_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
+const NIM_API_KEY =
+  process.env.NIM_API_KEY ||
+  process.env.NVIDIA_API_KEY;
+
+const NIM_BASE =
+  process.env.NIM_API_BASE ||
+  'https://integrate.api.nvidia.com/v1';
 
 
 // ============================================================
@@ -32,134 +37,215 @@ app.get('/health', (req, res) => {
 
 
 // ============================================================
-// SSE DEBUG MONITOR
-// Does NOT modify the Kimi stream.
-// It only observes what NVIDIA actually sends back.
+// KIMI STREAM TRANSFORMER
+//
+// NVIDIA sends:
+//   delta.reasoning_content
+//
+// We convert it into:
+//   delta.content = "<think>...</think>"
+//
+// This makes the reasoning visible to clients that understand
+// <think> tags but do not reliably render reasoning_content.
 // ============================================================
 
-function monitorKimiStream(stream, requestId) {
+function createKimiStreamTransformer(inputStream, res, requestId) {
   let buffer = '';
-  let chunkCount = 0;
+
+  let reasoningStarted = false;
+  let reasoningEnded = false;
+
   let reasoningChunks = 0;
   let contentChunks = 0;
+  let totalChunks = 0;
+
+  let reasoningChars = 0;
+  let contentChars = 0;
+
   let firstChunkLogged = false;
-  let reasoningPreview = '';
-  let contentPreview = '';
 
-  const processLine = (line) => {
-    line = line.trim();
-
-    if (!line.startsWith('data:')) {
-      return;
-    }
-
-    const data = line.slice(5).trim();
-
-    if (!data || data === '[DONE]') {
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(data);
-      chunkCount++;
-
-      const choice = parsed?.choices?.[0];
-      const delta = choice?.delta || {};
-
-      const hasReasoning =
-        typeof delta.reasoning_content === 'string' &&
-        delta.reasoning_content.length > 0;
-
-      const hasReasoningAlt =
-        typeof delta.reasoning === 'string' &&
-        delta.reasoning.length > 0;
-
-      const hasContent =
-        typeof delta.content === 'string' &&
-        delta.content.length > 0;
-
-      if (!firstChunkLogged) {
-        firstChunkLogged = true;
-
-        console.log('');
-        console.log('================ KIMI FIRST STREAM CHUNK ================');
-        console.log('Request ID:', requestId);
-        console.log('Delta keys:', Object.keys(delta));
-        console.log('Has reasoning_content:', hasReasoning);
-        console.log('Has reasoning:', hasReasoningAlt);
-        console.log('Has content:', hasContent);
-        console.log('Finish reason:', choice?.finish_reason);
-        console.log('==========================================================');
-        console.log('');
-      }
-
-      if (hasReasoning || hasReasoningAlt) {
-        reasoningChunks++;
-
-        const reasoningText =
-          delta.reasoning_content || delta.reasoning || '';
-
-        if (reasoningPreview.length < 500) {
-          reasoningPreview += reasoningText;
-          reasoningPreview = reasoningPreview.slice(0, 500);
-        }
-      }
-
-      if (hasContent) {
-        contentChunks++;
-
-        if (contentPreview.length < 300) {
-          contentPreview += delta.content;
-          contentPreview = contentPreview.slice(0, 300);
-        }
-      }
-
-      if (
-        hasContent &&
-        delta.content &&
-        (
-          delta.content.includes('<think>') ||
-          delta.content.includes('</think>')
-        )
-      ) {
-        console.log('>>> KIMI <think> TAG FOUND INSIDE CONTENT');
-      }
-
-      if (choice?.finish_reason) {
-        console.log('');
-        console.log('================ KIMI STREAM FINISHED ================');
-        console.log('Request ID:', requestId);
-        console.log('Finish reason:', choice.finish_reason);
-        console.log('Total chunks:', chunkCount);
-        console.log('Reasoning chunks:', reasoningChunks);
-        console.log('Content chunks:', contentChunks);
-        console.log(
-          'Reasoning received:',
-          reasoningChunks > 0 ? 'YES' : 'NO'
-        );
-        console.log(
-          'Reasoning preview:',
-          reasoningPreview || '[none]'
-        );
-        console.log(
-          'Content preview:',
-          contentPreview || '[none]'
-        );
-        console.log('=======================================================');
-        console.log('');
-      }
-
-    } catch (err) {
-      // Ignore incomplete/non-JSON SSE lines.
-    }
+  const sendSSE = (obj) => {
+    res.write(`data: ${JSON.stringify(obj)}\n\n`);
   };
 
-  stream.on('data', (chunk) => {
+  const processLine = (line) => {
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      return;
+    }
+
+    if (!trimmed.startsWith('data:')) {
+      return;
+    }
+
+    const raw = trimmed.slice(5).trim();
+
+    if (!raw) {
+      return;
+    }
+
+    if (raw === '[DONE]') {
+      console.log('');
+      console.log('================ KIMI STREAM SUMMARY ================');
+      console.log('Request ID:', requestId);
+      console.log('Total chunks:', totalChunks);
+      console.log('Reasoning chunks:', reasoningChunks);
+      console.log('Content chunks:', contentChunks);
+      console.log('Reasoning characters:', reasoningChars);
+      console.log('Content characters:', contentChars);
+      console.log(
+        'Reasoning received:',
+        reasoningChars > 0 ? 'YES' : 'NO'
+      );
+      console.log('=======================================================');
+      console.log('');
+
+      res.write('data: [DONE]\n\n');
+      return;
+    }
+
+    let parsed;
+
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return;
+    }
+
+    totalChunks++;
+
+    const choice = parsed?.choices?.[0];
+    const delta = choice?.delta;
+
+    if (!delta) {
+      sendSSE(parsed);
+      return;
+    }
+
+    if (!firstChunkLogged) {
+      firstChunkLogged = true;
+
+      console.log('');
+      console.log('================ KIMI FIRST CHUNK ================');
+      console.log('Request ID:', requestId);
+      console.log('Delta keys:', Object.keys(delta));
+      console.log(
+        'Has reasoning_content:',
+        typeof delta.reasoning_content === 'string' &&
+          delta.reasoning_content.length > 0
+      );
+      console.log(
+        'Has content:',
+        typeof delta.content === 'string' &&
+          delta.content.length > 0
+      );
+      console.log('====================================================');
+      console.log('');
+    }
+
+
+    // ========================================================
+    // REASONING CONTENT
+    // ========================================================
+
+    if (
+      typeof delta.reasoning_content === 'string' &&
+      delta.reasoning_content.length > 0
+    ) {
+      const reasoningText = delta.reasoning_content;
+
+      reasoningChunks++;
+      reasoningChars += reasoningText.length;
+
+      // First reasoning chunk opens <think>
+      if (!reasoningStarted) {
+        reasoningStarted = true;
+
+        sendSSE({
+          ...parsed,
+          choices: [
+            {
+              ...choice,
+              delta: {
+                ...delta,
+                reasoning_content: undefined,
+                content: '<think>\n' + reasoningText
+              }
+            }
+          ]
+        });
+      } else {
+        sendSSE({
+          ...parsed,
+          choices: [
+            {
+              ...choice,
+              delta: {
+                ...delta,
+                reasoning_content: undefined,
+                content: reasoningText
+              }
+            }
+          ]
+        });
+      }
+
+      return;
+    }
+
+
+    // ========================================================
+    // NORMAL CONTENT
+    // ========================================================
+
+    if (
+      typeof delta.content === 'string' &&
+      delta.content.length > 0
+    ) {
+      const contentText = delta.content;
+
+      contentChunks++;
+      contentChars += contentText.length;
+
+      // If reasoning was active, close <think> first.
+      if (reasoningStarted && !reasoningEnded) {
+        reasoningEnded = true;
+
+        sendSSE({
+          ...parsed,
+          choices: [
+            {
+              ...choice,
+              delta: {
+                ...delta,
+                content: '</think>\n\n' + contentText
+              }
+            }
+          ]
+        });
+      } else {
+        sendSSE(parsed);
+      }
+
+      return;
+    }
+
+
+    // ========================================================
+    // OTHER CHUNKS
+    // role, finish_reason, usage, etc.
+    // ========================================================
+
+    sendSSE(parsed);
+  };
+
+
+  inputStream.on('data', (chunk) => {
     buffer += chunk.toString();
 
     const lines = buffer.split('\n');
 
-    // Keep the last potentially incomplete line.
     buffer = lines.pop() || '';
 
     for (const line of lines) {
@@ -167,22 +253,40 @@ function monitorKimiStream(stream, requestId) {
     }
   });
 
-  stream.on('end', () => {
-    // Process anything left in the buffer.
+
+  inputStream.on('end', () => {
     if (buffer.trim()) {
       processLine(buffer);
     }
 
+    // Safety close if NVIDIA ended the stream without
+    // sending normal content after reasoning.
+    if (reasoningStarted && !reasoningEnded) {
+      res.write(
+        `data: ${JSON.stringify({
+          choices: [
+            {
+              delta: {
+                content: '</think>\n\n'
+              }
+            }
+          ]
+        })}\n\n`
+      );
+
+      reasoningEnded = true;
+    }
+
     console.log('');
-    console.log('>>> KIMI RAW STREAM ENDED');
+    console.log('>>> KIMI INPUT STREAM ENDED');
     console.log('Request ID:', requestId);
-    console.log('=======================================================');
     console.log('');
   });
 
-  stream.on('error', (err) => {
+
+  inputStream.on('error', (err) => {
     console.error('');
-    console.error('>>> KIMI STREAM ERROR');
+    console.error('>>> KIMI INPUT STREAM ERROR');
     console.error('Request ID:', requestId);
     console.error('Error:', err.message);
     console.error('');
@@ -196,7 +300,9 @@ function monitorKimiStream(stream, requestId) {
 
 app.post('/v1/chat/completions', async (req, res) => {
   const requestId =
-    `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    `${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
 
   console.log('');
   console.log('=======================================================');
@@ -206,8 +312,6 @@ app.post('/v1/chat/completions', async (req, res) => {
   console.log('=======================================================');
 
   if (!NIM_API_KEY) {
-    console.error('>>> NIM_API_KEY IS NOT CONFIGURED');
-
     return res.status(500).json({
       error: {
         message: 'NIM_API_KEY not set'
@@ -218,10 +322,7 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const body = { ...req.body };
 
-    // --------------------------------------------------------
-    // Remove fields that NVIDIA NIM may reject.
-    // --------------------------------------------------------
-
+    // Remove fields NVIDIA may reject.
     delete body.extra_body;
     delete body.logit_bias;
     delete body.presence_penalty;
@@ -229,12 +330,8 @@ app.post('/v1/chat/completions', async (req, res) => {
     delete body.n;
     delete body.seed;
 
-
-    // --------------------------------------------------------
-    // Detect model.
-    // --------------------------------------------------------
-
-    const modelName = (body.model || '').toLowerCase();
+    const modelName =
+      (body.model || '').toLowerCase();
 
     const isKimi =
       modelName.includes('kimi-k3') ||
@@ -245,7 +342,7 @@ app.post('/v1/chat/completions', async (req, res) => {
 
 
     // --------------------------------------------------------
-    // Existing thinking-mode models.
+    // Other thinking models
     // --------------------------------------------------------
 
     if (
@@ -260,18 +357,6 @@ app.post('/v1/chat/completions', async (req, res) => {
 
     // --------------------------------------------------------
     // KIMI K3
-    //
-    // K3 always has thinking enabled.
-    // We force MAX reasoning effort.
-    //
-    // IMPORTANT:
-    // We intentionally DO NOT modify:
-    //   - stream
-    //   - temperature
-    //   - max_tokens
-    //   - max_completion_tokens
-    //
-    // JanitorAI controls those.
     // --------------------------------------------------------
 
     if (isKimi) {
@@ -279,53 +364,26 @@ app.post('/v1/chat/completions', async (req, res) => {
 
       console.log('');
       console.log('>>> KIMI K3 DETECTED');
-      console.log('>>> reasoning_effort: max');
-
-      console.log(
-        '>>> stream:',
-        body.stream
-      );
-
-      console.log(
-        '>>> temperature:',
-        body.temperature
-      );
-
-      console.log(
-        '>>> max_tokens:',
-        body.max_tokens
-      );
-
+      console.log('>>> reasoning_effort:', body.reasoning_effort);
+      console.log('>>> stream:', body.stream);
+      console.log('>>> temperature:', body.temperature);
+      console.log('>>> max_tokens:', body.max_tokens);
       console.log(
         '>>> max_completion_tokens:',
         body.max_completion_tokens
       );
 
-      console.log(
-        '>>> stream_options:',
-        body.stream_options
-      );
-
-      console.log(
-        '>>> stop:',
-        body.stop
-      );
-
-      // ------------------------------------------------------
-      // Check whether JanitorAI is actually sending previous
-      // Kimi reasoning back in the conversation.
-      // ------------------------------------------------------
-
       if (Array.isArray(body.messages)) {
-        const assistantMessages = body.messages.filter(
-          (message) => message?.role === 'assistant'
-        );
+        const assistantMessages =
+          body.messages.filter(
+            m => m?.role === 'assistant'
+          );
 
-        const assistantWithReasoning =
+        const withReasoning =
           assistantMessages.filter(
-            (message) =>
-              typeof message?.reasoning_content === 'string' &&
-              message.reasoning_content.length > 0
+            m =>
+              typeof m?.reasoning_content === 'string' &&
+              m.reasoning_content.length > 0
           );
 
         console.log(
@@ -340,19 +398,8 @@ app.post('/v1/chat/completions', async (req, res) => {
 
         console.log(
           '>>> assistant messages containing reasoning_content:',
-          assistantWithReasoning.length
+          withReasoning.length
         );
-
-        if (assistantMessages.length > 0) {
-          const lastAssistant =
-            assistantMessages[assistantMessages.length - 1];
-
-          console.log(
-            '>>> last assistant has reasoning_content:',
-            typeof lastAssistant?.reasoning_content === 'string' &&
-            lastAssistant.reasoning_content.length > 0
-          );
-        }
       }
     }
 
@@ -366,78 +413,71 @@ app.post('/v1/chat/completions', async (req, res) => {
 
       console.log('');
       console.log('>>> DEEPSEEK DETECTED');
-      console.log('>>> reasoning_effort: high');
+      console.log(
+        '>>> reasoning_effort:',
+        body.reasoning_effort
+      );
     }
 
 
-    // --------------------------------------------------------
-    // Determine streaming mode.
-    // --------------------------------------------------------
-
-    const isStreaming = body.stream === true;
-
-    console.log('');
-    console.log('>>> FINAL REQUEST SETTINGS');
-    console.log('>>> Model:', body.model);
-    console.log('>>> Stream:', isStreaming);
-    console.log('>>> Temperature:', body.temperature);
-    console.log('>>> max_tokens:', body.max_tokens);
-    console.log(
-      '>>> max_completion_tokens:',
-      body.max_completion_tokens
-    );
-    console.log(
-      '>>> reasoning_effort:',
-      body.reasoning_effort
-    );
-    console.log('=======================================================');
-    console.log('');
+    const isStreaming =
+      body.stream === true;
 
 
     // --------------------------------------------------------
-    // Send request to NVIDIA.
+    // SEND TO NVIDIA
     // --------------------------------------------------------
 
     const response = await axios({
       method: 'post',
-      url: `${NIM_BASE}/chat/completions`,
+
+      url:
+        `${NIM_BASE}/chat/completions`,
 
       headers: {
-        'Authorization': `Bearer ${NIM_API_KEY}`,
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0',
+        'Authorization':
+          `Bearer ${NIM_API_KEY}`,
 
-        ...(isStreaming
-          ? {
-              'Accept': 'text/event-stream'
-            }
-          : {
-              'Accept': 'application/json'
-            })
+        'Content-Type':
+          'application/json',
+
+        'User-Agent':
+          'Mozilla/5.0',
+
+        'Accept':
+          isStreaming
+            ? 'text/event-stream'
+            : 'application/json'
       },
 
       data: body,
 
-      responseType: isStreaming
-        ? 'stream'
-        : 'json',
+      responseType:
+        isStreaming
+          ? 'stream'
+          : 'json',
 
       timeout: 180000,
 
-      validateStatus: () => true
+      validateStatus:
+        () => true
     });
 
 
     // --------------------------------------------------------
-    // NVIDIA returned an error.
+    // NVIDIA ERROR
     // --------------------------------------------------------
 
     if (response.status !== 200) {
-      let errorMsg = 'Unknown NVIDIA error';
+      let errorMsg =
+        'Unknown NVIDIA error';
 
       try {
-        if (typeof response.data === 'string') {
-          errorMsg = response.data;
+        if (
+          typeof response.data === 'string'
+        ) {
+          errorMsg =
+            response.data;
         } else if (
           response.data?.error?.message
         ) {
@@ -445,10 +485,11 @@ app.post('/v1/chat/completions', async (req, res) => {
             response.data.error.message;
         } else {
           errorMsg =
-            JSON.stringify(response.data)
-              .slice(0, 1000);
+            JSON.stringify(
+              response.data
+            ).slice(0, 1000);
         }
-      } catch (err) {
+      } catch {
         errorMsg =
           `NVIDIA returned status ${response.status}`;
       }
@@ -456,7 +497,6 @@ app.post('/v1/chat/completions', async (req, res) => {
       console.error('');
       console.error('>>> NVIDIA ERROR');
       console.error('Status:', response.status);
-      console.error('Request ID:', requestId);
       console.error('Error:', errorMsg);
       console.error('');
 
@@ -471,16 +511,10 @@ app.post('/v1/chat/completions', async (req, res) => {
 
 
     // --------------------------------------------------------
-    // STREAMING RESPONSE
+    // STREAMING
     // --------------------------------------------------------
 
     if (isStreaming) {
-      console.log('');
-      console.log('>>> NVIDIA STREAM CONNECTED');
-      console.log('>>> Request ID:', requestId);
-      console.log('>>> Monitoring Kimi stream without modifying it');
-      console.log('');
-
       res.setHeader(
         'Content-Type',
         'text/event-stream'
@@ -501,76 +535,65 @@ app.post('/v1/chat/completions', async (req, res) => {
         '*'
       );
 
-      // Monitor what NVIDIA sends.
-      // This does NOT alter the stream.
+      console.log('');
+      console.log('>>> NVIDIA STREAM CONNECTED');
+      console.log(
+        '>>> Request ID:',
+        requestId
+      );
+
       if (isKimi) {
-        monitorKimiStream(
+        console.log(
+          '>>> KIMI STREAM TRANSFORMATION ENABLED'
+        );
+
+        createKimiStreamTransformer(
           response.data,
+          res,
           requestId
         );
+      } else {
+        response.data.pipe(res);
       }
-
-      // Pass the original NVIDIA stream directly
-      // to JanitorAI.
-      response.data.pipe(res);
 
       return;
     }
 
 
     // --------------------------------------------------------
-    // NON-STREAMING RESPONSE
+    // NON-STREAMING
     // --------------------------------------------------------
 
     const data = response.data;
 
-    console.log('');
-    console.log('>>> NVIDIA NON-STREAM RESPONSE');
-    console.log('>>> Request ID:', requestId);
-
-    if (isKimi) {
+    if (
+      isKimi &&
+      data?.choices?.[0]?.message
+    ) {
       const msg =
-        data?.choices?.[0]?.message;
+        data.choices[0].message;
 
-      if (msg) {
-        const reasoning =
-          msg.reasoning_content ||
-          msg.reasoning ||
-          '';
+      const reasoning =
+        msg.reasoning_content ||
+        msg.reasoning ||
+        '';
 
-        console.log(
-          '>>> Kimi reasoning_content:',
-          reasoning
-            ? 'RECEIVED'
-            : 'NOT RECEIVED'
-        );
+      console.log('');
+      console.log(
+        '>>> KIMI NON-STREAM REASONING:',
+        reasoning
+          ? 'RECEIVED'
+          : 'NOT RECEIVED'
+      );
 
-        console.log(
-          '>>> Kimi content:',
-          msg.content
-            ? 'RECEIVED'
-            : 'EMPTY'
-        );
-
-        console.log(
-          '>>> finish_reason:',
-          data?.choices?.[0]?.finish_reason
-        );
-
-        // Keep the existing behavior for non-streaming
-        // responses so JanitorAI can see reasoning if
-        // NVIDIA returns it.
-        if (
-          reasoning &&
-          reasoning.trim().length > 0
-        ) {
-          msg.content =
-            `<think>\n${reasoning.trim()}\n</think>\n\n${msg.content || ''}`;
-        }
+      if (
+        reasoning &&
+        reasoning.trim().length > 0
+      ) {
+        msg.content =
+          `<think>\n${reasoning.trim()}\n</think>\n\n${msg.content || ''}`;
       }
     }
-
-    console.log('');
 
     res.json(data);
 
