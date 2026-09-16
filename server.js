@@ -52,7 +52,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     }
 
     if (modelName.includes('z-ai/glm-5.3')) {
-      body.reasoning_effort = 'medium';
+      body.reasoning_effort = 'low';
     }
     
     const isStreaming = body.stream === true;
