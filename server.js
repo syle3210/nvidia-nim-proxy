@@ -54,7 +54,10 @@ app.post('/v1/chat/completions', async (req, res) => {
     if (modelName.includes('z-ai/glm-5.3')) {
       body.reasoning_effort = 'medium';
     }
-    
+
+    if (modelName.includes('z-ai/glm-5.3-flash')) {
+      body.reasoning_effort = 'high';
+    }
     const isStreaming = body.stream === true;
 
     const response = await axios({
