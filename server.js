@@ -39,7 +39,9 @@ app.post('/v1/chat/completions', async (req, res) => {
 
     const modelName = (body.model || '').toLowerCase();
 
-    // Kimi K3
+    // Thinking / Reasoning
+
+    // Kimi K3 - max effort
     if (modelName.includes('kimi-k3') || modelName.includes('kimi_k3')) {
       body.reasoning_effort = 'max';
     }
@@ -49,21 +51,13 @@ app.post('/v1/chat/completions', async (req, res) => {
       body.reasoning_effort = 'max';
     }
 
-    // GLM-5.3 / Flash — try to disable thinking (like the Playground Off toggle)
-    if (modelName.includes('glm-5.3')) {
-      // Attempt 1: classic disable
-      body.thinking = { type: 'disabled' };
-
-      // Attempt 2: also try the chat_template way some NVIDIA endpoints use
-      body.chat_template_kwargs = {
-        enable_thinking: false,
-        clear_thinking: true
-      };
-
-      // Remove any previous reasoning_effort so it doesn’t force thinking
-      delete body.reasoning_effort;
+    if (modelName.includes('z-ai/glm-5.3')) {
+      body.reasoning_effort = 'low';
     }
 
+    if (modelName.includes('z-ai/glm-5.3-flash')) {
+      body.reasoning_effort = 'medium';
+    }
     const isStreaming = body.stream === true;
 
     const response = await axios({
@@ -89,7 +83,7 @@ app.post('/v1/chat/completions', async (req, res) => {
         } else if (response.data?.error?.message) {
           errorMsg = response.data.error.message;
         } else {
-          errorMsg = JSON.stringify(response.data).slice(0, 500);
+          errorMsg = JSON.stringify(response.data).slice(0, 400);
         }
       } catch (e) {
         errorMsg = `NVIDIA returned status ${response.status}`;
@@ -107,12 +101,14 @@ app.post('/v1/chat/completions', async (req, res) => {
     }
 
     if (isStreaming) {
+      // Streaming - just pass through for now
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('Access-Control-Allow-Origin', '*');
       response.data.pipe(res);
     } else {
+      // Non-streaming: inject reasoning into the visible content
       const data = response.data;
 
       if (data?.choices?.[0]?.message) {
