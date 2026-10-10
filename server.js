@@ -58,6 +58,10 @@ app.post('/v1/chat/completions', async (req, res) => {
     if (modelName.includes('z-ai/glm-5.3-flash')) {
       body.reasoning_effort = 'medium';
     }
+
+    if (modelName.includes('google/gemma-4-31b-it')) {
+      body.reasoning_effort = 'medium';
+    }
     const isStreaming = body.stream === true;
 
     const response = await axios({
