@@ -60,7 +60,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     }
 
     if (modelName.includes('google/gemma-4-31b-it')) {
-      body.reasoning_effort = 'max';
+      body.reasoning_effort = 'high';
     }
     const isStreaming = body.stream === true;
 
