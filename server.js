@@ -59,6 +59,10 @@ app.post('/v1/chat/completions', async (req, res) => {
       body.reasoning_effort = 'medium';
     }
 
+    if (modelName.includes('stepfun-ai/step-5-preview')) {
+      body.reasoning_effort = 'medium';
+    }
+
     if (modelName.includes('google/gemma-4-31b-it')) {
       body.reasoning_effort = 'high';
     }
