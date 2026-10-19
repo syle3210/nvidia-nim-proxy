@@ -56,7 +56,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     }
 
     if (modelName.includes('z-ai/glm-5.3-flash')) {
-      body.reasoning_effort = 'low';
+      body.reasoning_effort = 'high';
     }
 
     if (modelName.includes('stepfun-ai/step-5-preview')) {
