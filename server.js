@@ -66,6 +66,10 @@ app.post('/v1/chat/completions', async (req, res) => {
     if (modelName.includes('google/gemma-4-31b-it')) {
       body.reasoning_effort = 'high';
     }
+
+    if (modelName.includes('minimaxai/minimax-m3.1-flash')) {
+      body.reasoning_effort = 'high';
+    }
     const isStreaming = body.stream === true;
 
     const response = await axios({
