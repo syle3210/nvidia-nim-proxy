@@ -67,8 +67,8 @@ app.post('/v1/chat/completions', async (req, res) => {
       body.reasoning_effort = 'high';
     }
 
-    if (modelName.includes('mistralai/mistral-large-4-1t-a52b')) {
-      body.reasoning_effort = 'high';
+    if (modelName.includes('moonshotai/kimi-k3.1-pro')) {
+      body.reasoning_effort = 'low';
     }
 
     if (modelName.includes('minimaxai/minimax-m3.1-flash')) {
