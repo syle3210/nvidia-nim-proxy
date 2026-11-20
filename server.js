@@ -68,7 +68,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     }
 
     if (modelName.includes('moonshotai/kimi-k3.1-pro')) {
-      body.reasoning_effort = 'low';
+      body.reasoning_effort = 'none;
     }
 
     if (modelName.includes('minimaxai/minimax-m3.1-flash')) {
